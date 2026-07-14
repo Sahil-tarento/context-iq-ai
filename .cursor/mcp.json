@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "contextiq": {
+      "command": "/home/sahilchaudhary/Downloads/Personal/PersonalGitRepo/context-iq-ai/contextiq-mcp",
+      "args": ["--daemon-url", "http://localhost:9009"],
+      "env": {}
+    }
+  }
+}

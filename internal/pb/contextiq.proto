@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package contextiq;
+
+option go_package = "github.com/example/contextiq/internal/pb";
+
+service ContextService {
+  rpc Index(IndexRequest) returns (IndexResponse);
+  rpc Optimize(OptimizeRequest) returns (OptimizeResponse);
+  rpc Chat(ChatRequest) returns (ChatResponse);
+  rpc Mask(MaskRequest) returns (MaskResponse);
+}
+
+message IndexRequest {
+  string repo_path = 1;
+}
+
+message IndexResponse {
+  bool success = 1;
+  string message = 2;
+  int32 files_indexed = 3;
+  int32 symbols_indexed = 4;
+}
+
+message OptimizeRequest {
+  string query = 1;
+  repeated string open_files = 2;
+  string cursor_file = 3;
+  int32 cursor_line = 4;
+  string repo_path = 5;
+  int32 max_tokens = 6;
+}
+
+message OptimizeResponse {
+  string compressed_prompt = 1;
+  double token_savings = 2;
+  int32 raw_tokens = 3;
+  int32 optimized_tokens = 4;
+  repeated string included_symbols = 5;
+}
+
+message ChatRequest {
+  string provider = 1;
+  string model = 2;
+  string query = 3;
+  repeated string open_files = 4;
+  string cursor_file = 5;
+  int32 cursor_line = 6;
+  string repo_path = 7;
+  int32 max_tokens = 8;
+}
+
+message ChatResponse {
+  string response = 1;
+  int32 optimized_tokens = 2;
+  int32 raw_tokens = 3;
+  double token_savings = 4;
+  bool from_cache = 5;
+}
+
+message MaskRequest {
+  string text = 1;
+}
+
+message MaskResponse {
+  string masked_text = 1;
+  int32 items_masked = 2;
+}
