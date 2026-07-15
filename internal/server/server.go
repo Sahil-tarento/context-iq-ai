@@ -263,7 +263,7 @@ func (s *GRPCServer) Optimize(ctx context.Context, req *pb.OptimizeRequest) (*pb
 	if req.MaxTokens > 0 {
 		maxToks = int(req.MaxTokens)
 	}
-	comp := compressor.NewCompressor(maxToks)
+	comp := compressor.NewCompressor(maxToks, s.platform.Cache)
 	prompt, stats := comp.Compress(ranked)
 
 	// 3. Extract included symbol names
@@ -474,7 +474,7 @@ func (s *RESTServer) handleOptimize(w http.ResponseWriter, r *http.Request) {
 	if body.MaxTokens > 0 {
 		maxToks = body.MaxTokens
 	}
-	comp := compressor.NewCompressor(maxToks)
+	comp := compressor.NewCompressor(maxToks, s.platform.Cache)
 	prompt, stats := comp.Compress(ranked)
 
 	var included []string
@@ -543,6 +543,32 @@ func (s *RESTServer) handleMask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *RESTServer) handleRetrieve(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	content, exists := s.platform.Cache.GetCCR(body.Key)
+	if !exists {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Key not found in CCR cache",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":          true,
+		"original_content": content,
+	})
+}
+
 func (s *RESTServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "healthy",
@@ -568,6 +594,7 @@ func StartRESTServer(p *Platform, port string) (*http.Server, error) {
 	mux.HandleFunc("POST /v1/optimize", rest.handleOptimize)
 	mux.HandleFunc("POST /v1/chat", rest.handleChat)
 	mux.HandleFunc("POST /v1/mask", rest.handleMask)
+	mux.HandleFunc("POST /v1/retrieve", rest.handleRetrieve)
 	mux.HandleFunc("GET /v1/health", rest.handleHealth)
 	mux.HandleFunc("GET /v1/metrics", rest.handleMetrics)
 

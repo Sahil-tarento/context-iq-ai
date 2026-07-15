@@ -197,6 +197,16 @@ type optimizeArgs struct {
 
 type healthArgs struct{}
 
+type retrieveArgs struct {
+	Key string `json:"key"`
+}
+
+type retrieveResponse struct {
+	Success         bool   `json:"success"`
+	OriginalContent string `json:"original_content"`
+	Message         string `json:"message,omitempty"`
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 // Server is the ContextIQ MCP server. It reads JSON-RPC messages from stdin
@@ -321,6 +331,20 @@ func (s *Server) buildTools() []Tool {
 				Properties: map[string]Property{},
 			},
 		},
+		{
+			Name:        "contextiq_retrieve",
+			Description: "Retrieve original uncompressed source code for a specific CCR key/hash shown in code skeleton comments.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"key": {
+						Type:        "string",
+						Description: "The CCR Key/hash string to retrieve the original code block for.",
+					},
+				},
+				Required: []string{"key"},
+			},
+		},
 	}
 }
 
@@ -429,6 +453,8 @@ func (s *Server) handleToolsCall(req *Request) *Response {
 		result, err = s.toolOptimize(params.Arguments)
 	case "contextiq_health":
 		result, err = s.toolHealth()
+	case "contextiq_retrieve":
+		result, err = s.toolRetrieve(params.Arguments)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("Unknown tool: %s", params.Name))
 	}
@@ -605,6 +631,34 @@ func (s *Server) toolHealth() (*ToolCallResult, error) {
 	return &ToolCallResult{
 		Content: []ContentBlock{{Type: "text", Text: fmt.Sprintf("⚠️  Daemon returned status %d at %s", resp.StatusCode, s.daemonURL)}},
 		IsError: true,
+	}, nil
+}
+
+// ─── Tool: contextiq_retrieve ────────────────────────────────────────────────
+
+func (s *Server) toolRetrieve(raw json.RawMessage) (*ToolCallResult, error) {
+	var args retrieveArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %w", err)
+	}
+	if args.Key == "" {
+		return nil, fmt.Errorf("'key' is required")
+	}
+
+	var resp retrieveResponse
+	if err := s.postJSON("/v1/retrieve", retrieveArgs{Key: args.Key}, &resp); err != nil {
+		return nil, fmt.Errorf("daemon /v1/retrieve error: %w", err)
+	}
+
+	if !resp.Success {
+		return &ToolCallResult{
+			Content: []ContentBlock{{Type: "text", Text: fmt.Sprintf("❌ CCR Retrieval failed: %s", resp.Message)}},
+			IsError: true,
+		}, nil
+	}
+
+	return &ToolCallResult{
+		Content: []ContentBlock{{Type: "text", Text: resp.OriginalContent}},
 	}, nil
 }
 

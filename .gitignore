@@ -4,10 +4,11 @@
 *.dll
 *.so
 *.dylib
-contextiq
-contextiq-cli
-contextiq-mcp
-bin/
+# Root-level compiled binaries (use /prefix so source dirs are not ignored)
+/contextiq
+/contextiq-cli
+/contextiq-mcp
+/bin/
 plugins/vscode/node_modules
 
 # Test binary, built with `go test -c`

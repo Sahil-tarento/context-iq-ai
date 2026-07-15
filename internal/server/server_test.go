@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,5 +149,60 @@ func Main() {
 
 	if chatRes2.Response != chatRes.Response {
 		t.Errorf("expected cached response to match original, got: %q", chatRes2.Response)
+	}
+}
+
+func TestPlatform_Retrieve(t *testing.T) {
+	cfg := config.LoadConfig()
+	cfg.DefaultProv = "mock"
+	cfg.DefaultModel = "mock-model"
+
+	platform, err := NewPlatform(cfg)
+	if err != nil {
+		t.Fatalf("failed to initialize platform: %v", err)
+	}
+
+	testKey := "abc123xyz789"
+	testContent := "func TestRetrieveContent() {\n\t// Secret code\n}"
+	platform.Cache.SetCCR(testKey, testContent)
+
+	val, exists := platform.Cache.GetCCR(testKey)
+	if !exists {
+		t.Error("expected CCR key to exist")
+	}
+	if val != testContent {
+		t.Errorf("expected retrieve content %q, got %q", testContent, val)
+	}
+
+	server := NewRESTServer(platform)
+
+	reqBody := `{"key": "abc123xyz789"}`
+	req, err := http.NewRequest("POST", "/v1/retrieve", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.handleRetrieve)
+	handler.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+
+	var resp struct {
+		Success         bool   `json:"success"`
+		OriginalContent string `json:"original_content"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected retrieve response success to be true")
+	}
+
+	if resp.OriginalContent != testContent {
+		t.Errorf("expected original content %q, got %q", testContent, resp.OriginalContent)
 	}
 }

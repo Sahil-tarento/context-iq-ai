@@ -1,64 +1,96 @@
 # ContextIQ MCP — Setup & IDE Integration Guide
 
-## What Was Built
+---
 
-A **full MCP (Model Context Protocol) server** in Go that:
-- Runs as a subprocess launched by your IDE
-- Speaks **JSON-RPC 2.0 over stdio** (the MCP standard)
-- Proxies all AI calls to your existing **ContextIQ daemon** at `localhost:9009`
-- Exposes **4 tools** your IDE's AI can call
+## ❓ How Does This Work? (The Key Concept)
+
+There are **two separate AI models** at play. This is the most important thing to understand:
 
 ```
-Your IDE AI (Cursor / Claude Desktop / VS Code)
-        │  JSON-RPC 2.0 over stdio
-        ▼
-  contextiq-mcp  ←── NEW binary (Go)
-        │  HTTP REST
-        ▼
-  contextiq daemon  ←── already existed (port 9009)
-        │
-        ▼
-  Ollama / OpenAI / Claude / Gemini
+┌─────────────────────────────────────────────────────────────────┐
+│                         YOUR IDE                                 │
+│                                                                  │
+│  You type: "explain how handleChat works"                        │
+│       │                                                          │
+│       ▼                                                          │
+│  IDE's own AI  ◄── (Cursor's Claude / Copilot / etc.)           │
+│  "I should use the contextiq_chat tool for this"                 │
+│       │                                                          │
+│       │  calls via MCP (JSON-RPC over stdio)                     │
+│       ▼                                                          │
+│  contextiq-mcp  ──► ContextIQ Daemon (:9009)                    │
+│                           │                                      │
+│                           │  compresses context 70%+             │
+│                           ▼                                      │
+│                     YOUR LLM (Ollama / OpenAI / etc.)            │
+│                           │                                      │
+│                           │  response                            │
+│                           ▼                                      │
+│  IDE's AI gets result ◄── contextiq-mcp                         │
+│  and shows it to you                                             │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+**Model 1 — The IDE's built-in AI** (Cursor's Claude, GitHub Copilot, etc.)
+- Decides *when* to call ContextIQ tools based on your prompt
+- You never configure this — it's the IDE's model
+
+**Model 2 — ContextIQ's configured LLM** (Ollama/OpenAI/Claude/Gemini)
+- Does the actual code analysis
+- Receives a **70%-compressed** prompt instead of raw files
+- Set via `DEFAULT_PROVIDER` env var or the `--provider` argument in the tool call
+
+> The IDE AI is the "orchestrator." ContextIQ is the "smart code context tool" it calls.
 
 ---
 
-## Tools Available
+## Tools Exposed to the IDE
 
 | Tool | What it does |
 |---|---|
-| `contextiq_chat` | Ask a coding question — context is compressed 70%+ before LLM call |
-| `contextiq_index` | Index a repository for semantic context retrieval |
-| `contextiq_optimize` | Preview the compressed context without calling an LLM |
+| `contextiq_chat` | Ask a coding question — context compressed 70%+ before LLM call |
+| `contextiq_index` | Index a repo for semantic context retrieval |
+| `contextiq_optimize` | Preview compressed context without calling an LLM |
+| `contextiq_retrieve` | Retrieve original uncompressed source code for a specific CCR key/hash |
 | `contextiq_health` | Check if the daemon is running |
 
 ---
 
-## Step 1: Build the MCP Binary
+## Step 1: Install the Binary (once, per machine)
+
+This puts `contextiq-mcp` on your `$PATH` so **any IDE on your machine** can find it without a hardcoded path.
 
 ```bash
-cd /home/sahilchaudhary/Downloads/Personal/PersonalGitRepo/context-iq-ai
+cd /path/to/context-iq-ai
 
-go build -o contextiq-mcp ./cmd/mcp/
+# Option A — install to /usr/local/bin (may need sudo)
+make install
+
+# Option B — install to $GOPATH/bin (no sudo needed)
+make go-install
+# then ensure $GOPATH/bin is in your PATH:
+# export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
-> ✅ Already done — `contextiq-mcp` binary is in the project root.
+Verify:
+```bash
+which contextiq-mcp
+# /usr/local/bin/contextiq-mcp
+```
 
 ---
 
 ## Step 2: Start the ContextIQ Daemon
 
-The MCP server needs the daemon running to forward requests to.
-
 ```bash
-# Option A: Local binary
-./contextiq --port 9009
+# Local binary
+contextiq --port 9009
 
-# Option B: Docker Compose
+# or via Docker Compose
 docker compose up -d
 ```
 
-Verify it's healthy:
+Verify:
 ```bash
 curl http://localhost:9009/v1/health
 # {"status":"healthy","time":"..."}
@@ -66,81 +98,84 @@ curl http://localhost:9009/v1/health
 
 ---
 
-## Step 3: Add to Your IDE
+## Step 3: Configure Your IDE
+
+All configs use just `"command": "contextiq-mcp"` — **no hardcoded paths**. It resolves from PATH automatically.
+
+---
 
 ### 🖱️ Cursor IDE
 
-The config is already in the repo at `.cursor/mcp.json`. Cursor reads this automatically.
+The config `.cursor/mcp.json` is already in the repo. Cursor detects it automatically when you open the project folder.
 
-1. Open Cursor → Open the ContextIQ project folder
-2. Cursor detects `.cursor/mcp.json` on workspace load
-3. Go to **Cursor Settings → MCP** — you should see `contextiq` listed as `connected`
-4. In AI chat, type:
-   ```
-   Use contextiq_chat to explain what the Platform struct does in server.go
-   ```
-
-**Config file** (`.cursor/mcp.json`):
 ```json
 {
   "mcpServers": {
     "contextiq": {
-      "command": "/path/to/contextiq-mcp",
-      "args": ["--daemon-url", "http://localhost:9009"]
+      "command": "contextiq-mcp",
+      "args": ["--daemon-url", "http://localhost:9009"],
+      "env": {}
     }
   }
 }
 ```
 
+**Steps:**
+1. Open Cursor → Open the `context-iq-ai` project folder
+2. Go to `Cursor Settings → MCP` → confirm `contextiq` shows `connected`
+3. In AI chat, just ask naturally:
+   ```
+   explain how the Platform struct works in this codebase
+   ```
+   Cursor's AI will automatically decide to call `contextiq_chat` for you.
+
 ---
 
-### 🖱️ VS Code (with MCP support)
+### 🖱️ VS Code (Copilot Chat / MCP extension)
 
-The config is at `.vscode/mcp.json`. Works with:
-- VS Code Insiders with built-in MCP
-- GitHub Copilot Chat with MCP extension
+The config `.vscode/mcp.json` is already in the repo.
 
+```json
+{
+  "servers": {
+    "contextiq": {
+      "type": "stdio",
+      "command": "contextiq-mcp",
+      "args": ["--daemon-url", "http://localhost:9009"],
+      "env": {}
+    }
+  }
+}
+```
+
+**Steps:**
 1. Open VS Code → Open the project folder
-2. VS Code reads `.vscode/mcp.json`
-3. Open Copilot Chat → Tools → Enable `contextiq_*`
-4. In Copilot Chat: `@contextiq_chat what does handleIndex do?`
+2. Open Copilot Chat panel → click **Tools** → enable `contextiq_*` tools
+3. Ask in chat:
+   ```
+   @contextiq_chat how does the semantic cache work?
+   ```
 
 ---
 
-### 🖱️ Claude Desktop (Linux)
+### 🖱️ Claude Desktop (Linux / macOS)
 
 ```bash
-# Run the setup script
+# This script auto-finds contextiq-mcp from PATH — no hardcoded paths
 bash scripts/setup-claude-desktop.sh
-
-# Restart Claude Desktop
 ```
 
-The script writes to `~/.config/claude/claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "contextiq": {
-      "command": "/path/to/contextiq-mcp",
-      "args": ["--daemon-url", "http://localhost:9009"]
-    }
-  }
-}
-```
-
-In Claude Desktop, you'll see ContextIQ tools appear in the tool selector (🔧 icon).
+Then restart Claude Desktop. You'll see the 🔧 tool icon in chat.
 
 ---
 
-### 🖱️ Any MCP-compatible IDE (Generic)
-
-For **Windsurf**, **Zed**, **Neovim** (via `mcptools`), or any other client that supports MCP:
+### 🖱️ Any Other MCP IDE (Windsurf, Zed, Neovim)
 
 ```json
 {
   "mcpServers": {
     "contextiq": {
-      "command": "/absolute/path/to/contextiq-mcp",
+      "command": "contextiq-mcp",
       "args": ["--daemon-url", "http://localhost:9009"],
       "env": {}
     }
@@ -150,34 +185,35 @@ For **Windsurf**, **Zed**, **Neovim** (via `mcptools`), or any other client that
 
 ---
 
-## Example Usage in IDE Chat
+## Example Prompts in IDE Chat
 
-### Index your project first (once per project):
-```
-Use contextiq_index to index /home/sahilchaudhary/Downloads/Personal/PersonalGitRepo/context-iq-ai
-```
+The IDE AI handles tool selection automatically. Just ask naturally:
 
-### Ask a coding question:
 ```
-Use contextiq_chat to explain how the semantic cache works in this codebase
-```
+# Index first (once per project)
+"Index my current workspace with ContextIQ"
 
-### Check token savings:
-```
-Use contextiq_optimize with query "how does the masker work" and cursor_file "/path/to/server.go"
+# Ask coding questions
+"How does the token compression work in this codebase?"
+"What does the GraphEngine do and what files does it depend on?"
+"Explain the chat handler and show me how the masker is applied"
+
+# Check savings
+"Show me how much context compression ContextIQ is applying to this query"
 ```
 
 ---
 
-## Files Created
+## Makefile Reference
 
-| File | Purpose |
-|---|---|
-| `internal/mcp/server.go` | Full MCP server (JSON-RPC stdio + all tools) |
-| `cmd/mcp/main.go` | Binary entrypoint |
-| `.cursor/mcp.json` | Cursor IDE config (auto-detected) |
-| `.vscode/mcp.json` | VS Code config (auto-detected) |
-| `scripts/setup-claude-desktop.sh` | Claude Desktop setup script |
+```bash
+make build        # Build all 3 binaries locally
+make install      # Build + copy to /usr/local/bin (may need sudo)
+make go-install   # go install to $GOPATH/bin (no sudo)
+make run          # Start daemon on port 9009
+make test         # Run all Go tests
+make clean        # Remove local binaries
+```
 
 ---
 
@@ -185,7 +221,8 @@ Use contextiq_optimize with query "how does the masker work" and cursor_file "/p
 
 | Issue | Fix |
 |---|---|
-| Tool shows "daemon unreachable" | Run `./contextiq --port 9009` first |
-| Cursor doesn't show contextiq | Check absolute path in `.cursor/mcp.json` matches where binary is |
-| MCP server crashes | Check stderr: `./contextiq-mcp --daemon-url http://localhost:9009 2>&1` |
-| Binary not found | Run `go build -o contextiq-mcp ./cmd/mcp/` |
+| `contextiq-mcp: command not found` | Run `make install` or `make go-install` |
+| Cursor shows `contextiq: error` | Run `contextiq --port 9009` first |
+| MCP shows `daemon unreachable` | Check daemon is running: `curl http://localhost:9009/v1/health` |
+| IDE doesn't pick up mcp.json | Restart the IDE after first setup |
+| `make install` permission denied | Run with `sudo make install` |

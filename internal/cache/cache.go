@@ -18,11 +18,12 @@ type SemanticCacheEntry struct {
 	CreatedAt  time.Time         `json:"created_at"`
 }
 
-// CacheManager handles local/distributed caching for ASTs and LLM responses.
+// CacheManager handles local/distributed caching for ASTs, LLM responses, and CCR.
 type CacheManager struct {
 	mu            sync.RWMutex
 	contextCache  map[string]*model.FileNode  // FilePath -> FileNode
 	semanticCache []SemanticCacheEntry        // Slice of cached queries for local vector lookup
+	ccrCache      map[string]string           // Hash -> Original Body (CCR)
 }
 
 // NewCacheManager creates a new CacheManager.
@@ -30,7 +31,23 @@ func NewCacheManager() *CacheManager {
 	return &CacheManager{
 		contextCache:  make(map[string]*model.FileNode),
 		semanticCache: make([]SemanticCacheEntry, 0),
+		ccrCache:      make(map[string]string),
 	}
+}
+
+// SetCCR caches uncompressed original body by its hash.
+func (c *CacheManager) SetCCR(hash, body string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ccrCache[hash] = body
+}
+
+// GetCCR retrieves cached uncompressed original body by its hash.
+func (c *CacheManager) GetCCR(hash string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	body, exists := c.ccrCache[hash]
+	return body, exists
 }
 
 // GetContext retrieves a cached FileNode if SHA matches.

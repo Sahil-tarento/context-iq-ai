@@ -2,7 +2,7 @@
   "servers": {
     "contextiq": {
       "type": "stdio",
-      "command": "/home/sahilchaudhary/Downloads/Personal/PersonalGitRepo/context-iq-ai/contextiq-mcp",
+      "command": "contextiq-mcp",
       "args": ["--daemon-url", "http://localhost:9009"],
       "env": {}
     }

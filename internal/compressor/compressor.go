@@ -1,20 +1,24 @@
 package compressor
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
+	"github.com/example/contextiq/internal/cache"
 	"github.com/example/contextiq/internal/ranker"
 )
 
 // Compressor compresses prompt context to save tokens.
 type Compressor struct {
 	MaxTokens int
+	Cache     *cache.CacheManager // Optional cache for CCR (reversible compression)
 }
 
 // NewCompressor creates a new Compressor.
-func NewCompressor(maxTokens int) *Compressor {
-	return &Compressor{MaxTokens: maxTokens}
+func NewCompressor(maxTokens int, cacheMgr *cache.CacheManager) *Compressor {
+	return &Compressor{MaxTokens: maxTokens, Cache: cacheMgr}
 }
 
 // Compress takes ranked symbols and builds an optimized context prompt.
@@ -37,7 +41,9 @@ func (c *Compressor) Compress(ranked []ranker.RankedSymbol) (string, map[string]
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Below is the relevant codebase context optimized for this request.\n\n")
+	sb.WriteString("Below is the relevant codebase context optimized for this request.\n")
+	sb.WriteString("NOTE: Less relevant method/function bodies are optimized out to save tokens.\n")
+	sb.WriteString("To retrieve the original full implementation of any optimized block, use the tool 'contextiq_retrieve' with its respective CCR Key.\n\n")
 
 	rawTotalBytes := 0
 	optimizedTotalBytes := 0
@@ -63,10 +69,19 @@ func (c *Compressor) Compress(ranked []ranker.RankedSymbol) (string, map[string]
 			if includeFullBody {
 				rendered = sym.Body
 			} else {
-				// Strip body, output only signature and a skeleton placeholder
-				commentMarker := "// ... method body optimized out"
+				// Compute hash of the body for CCR (reversible context compression)
+				hasher := sha256.New()
+				hasher.Write([]byte(sym.Body))
+				hashVal := hex.EncodeToString(hasher.Sum(nil))[:12]
+
+				if c.Cache != nil {
+					c.Cache.SetCCR(hashVal, sym.Body)
+				}
+
+				// Strip body, output only signature and a skeleton placeholder with CCR key
+				commentMarker := fmt.Sprintf("// ... method body optimized out (CCR Key: %s)", hashVal)
 				if getMarkdownLanguage(filePath) == "python" {
-					commentMarker = "# ... method body optimized out"
+					commentMarker = fmt.Sprintf("# ... method body optimized out (CCR Key: %s)", hashVal)
 				}
 				rendered = fmt.Sprintf("%s {\n    %s\n}", sym.Signature, commentMarker)
 				if getMarkdownLanguage(filePath) == "python" {

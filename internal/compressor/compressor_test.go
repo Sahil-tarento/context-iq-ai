@@ -46,7 +46,7 @@ func TestCompressor(t *testing.T) {
 		},
 	}
 
-	compressor := NewCompressor(2048)
+	compressor := NewCompressor(2048, nil)
 	prompt, stats := compressor.Compress(ranked)
 
 	if !strings.Contains(prompt, "func ActiveFunc() {") {
@@ -65,8 +65,8 @@ func TestCompressor(t *testing.T) {
 		t.Error("expected HelperFunc body to be stripped and not contain body lines")
 	}
 
-	if !strings.Contains(prompt, "method body optimized out") {
-		t.Error("expected prompt to contain skeleton placeholder comment")
+	if !strings.Contains(prompt, "CCR Key:") {
+		t.Error("expected prompt to contain CCR Key for the optimized HelperFunc")
 	}
 
 	savings := stats["savings_percent"].(float64)
