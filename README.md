@@ -72,6 +72,57 @@ docker compose up --build -d
 
 ---
 
+## 🧪 How to Test and Verify Token Savings
+
+The entire point of ContextIQ is to save tokens. We made it extremely easy to prove that it is actually working and measure the exact token consumption savings on your codebase.
+
+### Option 1: Using the CLI Wrapper (Single Query)
+Run a query using the CLI wrapper pointing to a file in your project:
+```bash
+go run ./cmd/cli/main.go ask --query="Explain this code" --cursor-file="$(pwd)/cmd/contextiq/main.go" --repo-path="$(pwd)"
+```
+**Expected Output:**
+You will immediately see a console printout proving the reduction before the LLM's response:
+```text
+==================================================
+Tokens Reduced: 5120 -> 1024 (Savings: 80.0%)
+==================================================
+[Response from LLM...]
+```
+
+### Option 2: Full System Load Test (Batch Verification)
+To rigorously test the token savings and performance efficiency of ContextIQ, you can use the bundled load testing script. This script sends multiple concurrent queries to the daemon and aggregates the token savings.
+
+1. **Ensure the ContextIQ daemon is running** on port `9009`:
+   ```bash
+   # Run with mock provider for zero-cost testing
+   DEFAULT_PROVIDER=mock DEFAULT_MODEL=mock go run ./cmd/contextiq/main.go
+   ```
+2. **Run the Load Test Script**:
+   ```bash
+   bash scripts/load_test.sh http://localhost:9009 5 20 "$(pwd)"
+   ```
+   *Arguments: `<daemon_url> <concurrency> <iterations> <repo_path>`*
+
+**What the Load Test Verifies:**
+- **Step 1:** Automatically indexes your local repository.
+- **Step 2:** Runs a battery of concurrent code queries against the `/v1/optimize` endpoint.
+- **Step 3:** Computes the total **raw tokens**, **optimized tokens**, and the **overall percentage of tokens saved**. It even estimates cost savings based on standard GPT-4 pricing!
+- **Step 4:** Verifies the CCR (Compress-Cache-Retrieve) architecture by fetching an optimized-out method body.
+
+**Example Output:**
+```text
+  Total requests:        20
+  Passed:                20
+
+  Total raw tokens:      84520
+  Total optimized tokens: 23410
+  Total tokens saved:    61110  (72.3% reduction)
+  Avg savings per req:   72.3%
+```
+
+---
+
 ## 🔌 IDE Integration
 
 Once the daemon is running, you can connect your IDE.
